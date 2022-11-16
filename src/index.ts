@@ -116,7 +116,7 @@ if (inputPath) {
   if (inputData) {
     console.info("Parsing started at: ", new Date().toISOString());
     /**
-     * Parse input object (XHR response)
+     * Parse the input object (XHR response)
      *
      * input:
      *  JSON object (XHR response)
@@ -157,11 +157,11 @@ if (inputPath) {
     const csvData = data.map((entry) => ({
       ...entry,
       // display occurrences as "key | otherKey | ..." - createCSV could convert comma-separated values
-      // occurrences: entry.occurrences.replace(", ", " | "),
+      occurrences: entry.occurrences.replace(", ", " | "),
       item: JSON.stringify(entry.item)
         // .replace("{", "")
         // .replace("}", "")
-        // .replace(",", "; "),
+        .replace(",", ";"),
     }));
     createCSV(csvData, filename.split(".")[0]);
     console.info(
