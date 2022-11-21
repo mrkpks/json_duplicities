@@ -3,7 +3,7 @@ import { createCSV } from "./csv.js";
 
 const hashes = new Map<
   number,
-  { count: number; occurrences: Set<string>; item: object }
+  { count: number; occurrences: Set<string>; item: object, path: string[] }
 >();
 
 function sortObj(unordered: object): object {
@@ -69,7 +69,7 @@ function simpleHash(str: string): number {
   return hash;
 }
 
-function handleObjValue(val: unknown, keyName: string): void {
+function handleObjValue(val: unknown, keyName: string, path: string[] = []): void {
   // console.warn("keyName: ", keyName);
   // handle primitive value; (ignore null & undefined - remove the condition if needed)
   if (Object(val) !== val || val == null) {
@@ -87,22 +87,24 @@ function handleObjValue(val: unknown, keyName: string): void {
         ...entry,
         occurrences: entry.occurrences.add(keyName),
         count: entry.count + 1,
+        path,
       });
     } else {
       hashes.set(hash, {
         count: 1,
         occurrences: new Set("").add(keyName),
         item: val as object | unknown[],
+        path: [],
       });
     }
     Object.keys(val as object).forEach((key) => {
       // handle array // todo: array is also an object so it can be combined - decide if we need to treat arrays differently
       if (Array.isArray(val)) {
-        handleObjValue((val as unknown[])[key as unknown as number], key);
+        handleObjValue((val as unknown[])[key as unknown as number], key, path);
       } else {
         // handle an object
         // @ts-ignore
-        handleObjValue((val as object)[key], key);
+        handleObjValue((val as object)[key], key, [...path, key]);
       }
     });
   }
@@ -131,7 +133,7 @@ if (inputPath) {
      * */
     Object.keys(inputData).forEach((key) => {
       // @ts-ignore
-      handleObjValue(inputData[key], key);
+      handleObjValue(inputData[key], key, [key]);
     });
     const data = [...hashes.values()]
         // filter results with less than (5) occurrences // todo: read from command line argument if needed
@@ -139,9 +141,15 @@ if (inputPath) {
       // sort from the most to the least occurrences
       .sort((a, b) => b.count - a.count)
       .map((data) => ({
-        ...data,
+        // ...data,
         // display occurrences as "key, otherKey, ..." - better for both JSON and CSV visualisation
-        occurrences: Array.from(data.occurrences).join(", "),
+        count: data.count,
+        occurrences: Array.from(data.occurrences).join(' | '),
+        path: data.path.join('.'),
+        item: JSON.stringify(data.item)
+            // .replace("{", "")
+            // .replace("}", "")
+            .replace(",", ";").slice(0, 40),
       }));
 
     console.info("Parsing ended at: ", new Date().toISOString());
@@ -154,16 +162,16 @@ if (inputPath) {
     /** Create a .csv file for table view */
 
     // re-map "item" object to string so that it won't create unique paths
-    const csvData = data.map((entry) => ({
-      ...entry,
-      // display occurrences as "key | otherKey | ..." - createCSV could convert comma-separated values
-      occurrences: entry.occurrences.replace(", ", " | "),
-      item: JSON.stringify(entry.item)
-        // .replace("{", "")
-        // .replace("}", "")
-        .replace(",", ";"),
-    }));
-    createCSV(csvData, filename.split(".")[0]);
+    // const csvData = data.map((entry) => ({
+    //   ...entry,
+    //   // display occurrences as "key | otherKey | ..." - createCSV could convert comma-separated values
+    //   // occurrences: entry.occurrences.replace(", ", " | "),
+    //   // item: JSON.stringify(entry.item)
+    //   //   // .replace("{", "")
+    //   //   // .replace("}", "")
+    //   //   .replace(",", ";"),
+    // }));
+    createCSV(data, filename.split(".")[0]);
     console.info(
       `Created outputs/csv/${filename.split(".")[0]}.csv`,
       new Date().toISOString()
@@ -182,22 +190,22 @@ if (inputPath) {
     //   }))
     // );
     console.table(data);
-    const totalDuplicitiesByType = csvData.reduce(
-        (acc: { [key: string]: number }, item) => {
-          if (acc[item.occurrences]) {
-            return {...acc, [item.occurrences]: acc[item.occurrences] += item.count }
-          } else {
-            return { ...acc, [item.occurrences]: item.count }
-          }
-        }, {}
-    );
-    const totalDuplicities = csvData.reduce(
+    // const totalDuplicitiesByType = csvData.reduce(
+    //     (acc: { [key: string]: number }, item) => {
+    //       if (acc[item.occurrences]) {
+    //         return {...acc, [item.occurrences]: acc[item.occurrences] += item.count }
+    //       } else {
+    //         return { ...acc, [item.occurrences]: item.count }
+    //       }
+    //     }, {}
+    // );
+    const totalDuplicities = data.reduce(
       (acc, item) => (acc += item.count),
       0
     );
     console.info(`\n\n\nTOTAL DUPLICITIES: ${totalDuplicities}\n\n\n`);
-    console.info(`\n\n\nTOTAL DUPLICITIES BY TYPE:`);
-    console.table(totalDuplicitiesByType);
+    // console.info(`\n\n\nTOTAL DUPLICITIES BY TYPE:`);
+    // console.table(totalDuplicitiesByType);
   }
 } else {
   console.error(
