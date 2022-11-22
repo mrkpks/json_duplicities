@@ -100,7 +100,7 @@ function handleObjValue(val: unknown, keyName: string, path: string[] = []): voi
     Object.keys(val as object).forEach((key) => {
       // handle array // todo: array is also an object so it can be combined - decide if we need to treat arrays differently
       if (Array.isArray(val)) {
-        handleObjValue((val as unknown[])[key as unknown as number], key, path);
+        handleObjValue((val as unknown[])[key as unknown as number], key, [...path, `[${key}]`]);
       } else {
         // handle an object
         // @ts-ignore
@@ -135,61 +135,57 @@ if (inputPath) {
       // @ts-ignore
       handleObjValue(inputData[key], key, [key]);
     });
-    const data = [...hashes.values()]
+    const parsedData = [...hashes.values()]
         // filter results with less than (5) occurrences // todo: read from command line argument if needed
       .filter((item) => item.count > 5)
       // sort from the most to the least occurrences
-      .sort((a, b) => b.count - a.count)
-      .map((data) => ({
-        // ...data,
-        // display occurrences as "key, otherKey, ..." - better for both JSON and CSV visualisation
-        count: data.count,
-        occurrences: Array.from(data.occurrences).join(' | '),
-        path: data.path.join('.'),
-        item: JSON.stringify(data.item)
-            // .replace("{", "")
-            // .replace("}", "")
-            .replace(",", ";").slice(0, 40),
-      }));
+      .sort((a, b) => b.count - a.count);
 
     console.info("Parsing ended at: ", new Date().toISOString());
 
+    /** Create a .json file from parsed data */
+    const jsonData = parsedData.map((data) => ({
+      // display occurrences as "key | otherKey, ..." - better for both JSON visualisation
+      count: data.count,
+      occurrences: Array.from(data.occurrences),
+      lastPath: data.path.join('.'),
+      item: data.item,
+    }));
     const filename = inputPath.split("/")[1];
-
-    fs.writeFileSync(`outputs/${filename}`, JSON.stringify(data));
+    fs.writeFileSync(`outputs/${filename}`, JSON.stringify(jsonData));
     console.info(`Created outputs/${filename}`, new Date().toISOString());
 
     /** Create a .csv file for table view */
-
-    // re-map "item" object to string so that it won't create unique paths
-    // const csvData = data.map((entry) => ({
-    //   ...entry,
-    //   // display occurrences as "key | otherKey | ..." - createCSV could convert comma-separated values
-    //   // occurrences: entry.occurrences.replace(", ", " | "),
-    //   // item: JSON.stringify(entry.item)
-    //   //   // .replace("{", "")
-    //   //   // .replace("}", "")
-    //   //   .replace(",", ";"),
-    // }));
-    createCSV(data, filename.split(".")[0]);
+    const csvData = jsonData.map((data) => ({
+      // display occurrences as "key | otherKey | ..." - createCSV could convert comma-separated values
+      count: data.count,
+      occurrences: data.occurrences.join(" | "),
+      lastPath: data.lastPath,
+      itemPreview: JSON.stringify(data.item).slice(0, 60).replace(",", ";"),
+    }));
+    // **mutates csvData!**
+    createCSV(csvData, filename.split(".")[0]);
     console.info(
       `Created outputs/csv/${filename.split(".")[0]}.csv`,
       new Date().toISOString()
     );
 
+    /** Create a console table view of parsed data */
+    const tableData = parsedData.map((data) => ({
+      count: data.count,
+      occurrences: Array.from(data.occurrences),
+      lastPath: data.path.join('.'),
+      itemPreview: JSON.stringify(data.item).slice(0, 60),
+      // todo: add estimatedSize of the duplicate (stringified)
+      // todo: check if there is total file size info somewhere
+    }));
     console.info(
       "\n\n\n==============================SUMMARY==============================\n\n\n"
     );
-    // console.table(
-    //   data.map((entry) => ({
-    //     ...entry,
-    //     item:
-    //       typeof entry.item === "object" && !Array.isArray(entry.item)
-    //         ? JSON.stringify(entry.item)
-    //         : entry.item,
-    //   }))
-    // );
-    console.table(data);
+    console.table(tableData);
+
+    // /** Print aggregated duplicities by occurrence */
+    // // fixme - this gets messy with array keys - might be very inaccurate
     // const totalDuplicitiesByType = csvData.reduce(
     //     (acc: { [key: string]: number }, item) => {
     //       if (acc[item.occurrences]) {
@@ -199,13 +195,15 @@ if (inputPath) {
     //       }
     //     }, {}
     // );
-    const totalDuplicities = data.reduce(
+    // console.info(`\n\n\nTOTAL DUPLICITIES BY TYPE:`);
+    // console.table(totalDuplicitiesByType);
+
+    /** Print total duplicated objects (incl. arrays) */
+    const totalDuplicities = parsedData.reduce(
       (acc, item) => (acc += item.count),
       0
     );
-    console.info(`\n\n\nTOTAL DUPLICITIES: ${totalDuplicities}\n\n\n`);
-    // console.info(`\n\n\nTOTAL DUPLICITIES BY TYPE:`);
-    // console.table(totalDuplicitiesByType);
+    console.info(`\n\n\nTOTAL DUPLICATED OBJECTS: ${totalDuplicities}\n\n\n`);
   }
 } else {
   console.error(
