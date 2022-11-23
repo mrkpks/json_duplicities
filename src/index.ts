@@ -3,20 +3,38 @@ import { createCSV } from "./csv.js";
 
 const hashes = new Map<
   number,
-  { count: number; occurrences: Set<string>; item: object; path: string[] }
+  {
+    count: number;
+    occurrences: Set<string>;
+    item: object;
+    path: string[];
+  }
 >();
 
-function sortObj(unordered: object): object {
-  return [...Object.keys(unordered)].sort().reduce((obj, key) => {
+// helper to check whether an object does NOT contain any nested objects or arrays of objects
+// empty arrays and arrays of primitives are OK
+const isPlainObject = (val: { [key: string]: unknown }) =>
+  Object.entries(val as { [key: string]: unknown }).every(([_, value]) => {
+    if (typeof value === "object" && value != null) {
+      if (Array.isArray(value)) {
+        // count in objects with nested arrays with primitive values and empty nested arrays ([].every returns true)
+        return value.every((item) => item === null || typeof item !== "object");
+      } else {
+        // found a nested object
+        return false;
+      }
+    }
+    return true;
+  });
+
+const sortObj = (unordered: object): object =>
+  [...Object.keys(unordered)].sort().reduce((obj, key) => {
     // @ts-ignore
     obj[key] = unordered[key];
     return obj;
   }, {});
-}
 
-function getItemSize(item: object): number {
-  return JSON.stringify(item).length;
-}
+const getItemSize = (item: object): number => JSON.stringify(item).length;
 
 const flattenObj = (ob: object) => {
   // The object which contains the
@@ -48,7 +66,7 @@ const flattenObj = (ob: object) => {
   return result;
 };
 
-// todo: fix nested objects sorting
+// todo: fix nested objects sorting IF NEEDED (shouldn't be => leaf objects should be always of the same type)
 // sortNestedObj(unordered: object): object {
 //   // eslint-disable-next-line functional/immutable-data
 //   let ordered = {};
@@ -63,7 +81,7 @@ const flattenObj = (ob: object) => {
 //   return ordered;
 // }
 
-function simpleHash(str: string): number {
+const simpleHash = (str: string): number => {
   let hash = 0;
   for (let i = 0, len = str.length; i < len; i++) {
     const chr = str.charCodeAt(i);
@@ -71,13 +89,13 @@ function simpleHash(str: string): number {
     hash |= 0; // Convert to 32bit integer
   }
   return hash;
-}
+};
 
-function handleObjValue(
+const handleObjValue = (
   val: unknown,
   keyName: string,
   path: string[] = []
-): void {
+): void => {
   // console.warn("keyName: ", keyName);
   // handle primitive value; (ignore null & undefined - remove the condition if needed)
   if (Object(val) !== val || val == null) {
@@ -106,7 +124,7 @@ function handleObjValue(
       });
     }
     Object.keys(val as object).forEach((key) => {
-      // handle array // todo: array is also an object so it can be combined - decide if we need to treat arrays differently
+      // handle array
       if (Array.isArray(val)) {
         handleObjValue((val as unknown[])[key as unknown as number], key, [
           ...path,
@@ -119,7 +137,7 @@ function handleObjValue(
       }
     });
   }
-}
+};
 
 const inputPath = process.argv.find((arg) => arg.includes(".json"));
 
@@ -178,7 +196,7 @@ if (inputPath) {
     }));
     const filename = inputPath.split("/")[1];
     fs.writeFileSync(`outputs/${filename}`, JSON.stringify(jsonData));
-    console.info(`Created outputs/${filename}`, new Date().toISOString());
+    console.info(`Created outputs/${filename} at: `, new Date().toISOString());
 
     /** Create a .csv file for table view */
     const csvData = jsonData.map((data) => ({
@@ -191,7 +209,7 @@ if (inputPath) {
     // **mutates csvData!**
     createCSV(csvData, filename.split(".")[0]);
     console.info(
-      `Created outputs/csv/${filename.split(".")[0]}.csv`,
+      `Created outputs/csv/${filename.split(".")[0]}.csv at: `,
       new Date().toISOString()
     );
 
@@ -210,7 +228,7 @@ if (inputPath) {
     console.table(tableData);
 
     // /** Print aggregated duplicities by occurrence */
-    // // fixme - this gets messy with array keys - might be very inaccurate
+    // // fixme - this implementation gets messy with array keys - might be very inaccurate => IF NEEDED: try to hash object keys and aggregate by them
     // const totalDuplicitiesByType = csvData.reduce(
     //     (acc: { [key: string]: number }, item) => {
     //       if (acc[item.occurrences]) {
@@ -223,34 +241,84 @@ if (inputPath) {
     // console.info(`\n\n\nTOTAL DUPLICITIES BY TYPE:`);
     // console.table(totalDuplicitiesByType);
 
-    // fixme (if possible): counts also parent and children objects => incorrect data interpretation
-    /** Print total duplicated objects (incl. arrays) */
+    /**
+     * Print total number of duplicates found
+     * ! might be inaccurate: includes parent objects (and arrays with nested objects) which can have nested duplicates somewhere else
+     * */
     const totalDuplicities = parsedData.reduce(
       (acc, item) => (acc += item.count),
       0
     );
     console.info(`\n\n\n`);
-    console.info(`TOTAL DUPLICATED OBJECTS: ${totalDuplicities}`);
-    // fixme (if possible): counts also parent and children objects => incorrect data interpretation
-    // /** Print total duplicated objects size */
-    // const totalDuplicitiesSize = parsedData.reduce(
-    //   (acc, item) => (acc += item.sizeInBytes),
-    //   0
-    // );
-    // console.info(`TOTAL DUPLICATED OBJECTS SIZE (B): ${totalDuplicitiesSize}`);
-    // console.info(
-    //   `TOTAL DUPLICATED OBJECTS SIZE (MB): ${
-    //       (totalDuplicitiesSize / (1024 * 1024)).toFixed(2)
-    //   }`
-    // );
-    /** Print total file size in B */
-    console.info(`TOTAL FILE SIZE (B): ${fileSizeInBytes}`);
-    /** Print total file size in MB */
-    console.info(
-      `TOTAL FILE SIZE (MB): ${(fileSizeInBytes / (1024 * 1024)).toFixed(2)}`
+    console.info(`TOTAL DUPLICATED OBJECTS: ${totalDuplicities} - *might be inaccurate: includes parent objects`);
+    console.info(`\n\n\n`);
+
+    /** Print info about "leaf node object" duplicities */
+    const parsedLeafObjects = parsedData.filter(
+      (data) =>
+        typeof data.item === "object" &&
+        !Array.isArray(data.item) &&
+        data.item != null &&
+        isPlainObject(data.item as { [key: string]: unknown })
     );
-    // fixme (if possible): counts also parent and children objects => incorrect data interpretation
-    // console.info(`TOTAL DUPLICATES PERCENTAGE: ${((totalDuplicitiesSize / fileSizeInBytes) * 100).toFixed(2)}%`);
+
+    console.table(
+      parsedLeafObjects.map((data) => ({
+        count: data.count,
+        occurrences: data.occurrences,
+        lastPath: data.path.join("."),
+        itemPreview: JSON.stringify(data.item).slice(0, 40),
+        sizeInBytes: data.sizeInBytes,
+        percentage: data.percentage,
+      }))
+    );
+
+    console.info(`\n\n\n`);
+
+    /** Print total duplicated leaf objects */
+    const totalLeafDuplicities = parsedLeafObjects.reduce(
+        (acc, item) => (acc += item.count),
+        0
+    );
+    const totalLeafDuplicitiesSize = parsedLeafObjects.reduce(
+        (acc, item) => (acc += item.sizeInBytes),
+        0
+    );
+    const potentialLeafObjectsSize = parsedLeafObjects.reduce(
+        (acc, entry) => (acc += getItemSize(entry.item)),
+        0
+    );
+    const potentialFileSizeReductionPercent = (((totalLeafDuplicitiesSize - potentialLeafObjectsSize) / fileSizeInBytes) * 100).toFixed(2)
+
+    /**
+     *
+     * Print possible optimizations in a table
+     *
+     * */
+    const currentVsOptimizedTable = {
+      currentCount: `${totalLeafDuplicities} items`,
+      potentialCount: `${parsedLeafObjects.length} items`,
+      currentLeafObjectsSize: `${totalLeafDuplicitiesSize} Bytes`,
+      potentialLeafObjectsSize: `${potentialLeafObjectsSize} Bytes`,
+      potentialSizeReduction: `${fileSizeInBytes - (totalLeafDuplicitiesSize + potentialLeafObjectsSize)} Bytes`,
+      potentialFileSizeReductionPercent: `${potentialFileSizeReductionPercent}%`,
+    }
+
+    console.table(currentVsOptimizedTable);
+
+    console.info(`\n\n\n`);
+
+    /** Print count info */
+    console.info(`Current leaf object count is ${totalLeafDuplicities} items (leaf objects with duplicities)`);
+    console.info(`...of which ${parsedLeafObjects.length} are unique.`);
+    console.info('\n');
+    /** Print size info */
+    console.info(`Current leaf objects size: ${totalLeafDuplicitiesSize}B / ${(totalLeafDuplicitiesSize / (1024 * 1024)).toFixed(2)}MB`);
+    console.info(`Total file size: ${fileSizeInBytes}B / ${(fileSizeInBytes / (1024 * 1024)).toFixed(2)}MB`);
+    console.info(`Currently the leaf objects with duplicities take up ${((totalLeafDuplicitiesSize / fileSizeInBytes) * 100).toFixed(2)}% of the file size!`);
+    console.info('\n');
+    console.info(`The file size can be reduced by up to ${potentialFileSizeReductionPercent}% if all duplicities are removed.`);
+
     console.info(`\n\n\n`);
   }
 } else {
